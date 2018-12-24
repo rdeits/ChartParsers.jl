@@ -2,6 +2,10 @@ module ChartParsers
 
 export Chart, parse, Grammar, expand, complete_parses
 
+abstract type Strategy end
+struct BottomUp <: Strategy end
+struct TopDown <: Strategy end
+
 # include("FixedCapacityVectors.jl")
 # using .FixedCapacityVectors
 
@@ -163,8 +167,23 @@ struct Grammar
     words::Dict{String, Vector{Symbol}}
 end
 
+const Agenda = Vector{Arc}
 
-function initial_agenda(tokens, grammar)
+function initial_chart(tokens, grammar, ::BottomUp)
+    Chart(length(tokens))
+end
+
+function initial_chart(tokens, grammar, ::TopDown)
+    chart = Chart(length(tokens))
+    for (i, token) in enumerate(tokens)
+        for head in grammar.words[token]
+            push!(chart, Arc(i - 1, i, head => [Symbol("#token")], [string(token)]))
+        end
+    end
+    chart
+end
+
+function initial_agenda(tokens, grammar, ::BottomUp)
     agenda = Arc[]
 
     for (i, token) in enumerate(tokens)
@@ -175,9 +194,49 @@ function initial_agenda(tokens, grammar)
     agenda
 end
 
-function parse(tokens, grammar)
-    chart = Chart(length(tokens))
-    agenda = initial_agenda(tokens, grammar)
+function initial_agenda(tokens, grammar, ::TopDown)
+    agenda = Arc[]
+
+    for rule in grammar.productions
+        if lhs(rule) == :S  # TODO get start symbol from grammar
+            push!(agenda, Arc(0, 0, rule, []))
+        end
+    end
+    agenda
+end
+
+function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, ::BottomUp)
+    if !isactive(candidate)
+        for rule in grammar.productions
+            if first(rhs(rule)) == head(candidate)
+                hypothesis = Arc(candidate.start,
+                                 candidate.start,
+                                 rule,
+                                 [])
+                if hypothesis ∉ chart
+                    pushfirst!(agenda, hypothesis)
+                end
+            end
+        end
+    end
+end
+
+function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, ::TopDown)
+    if isactive(candidate)
+        for rule in grammar.productions
+            if lhs(rule) == next_needed(candidate)
+                hypothesis = Arc(candidate.stop, candidate.stop, rule, [])
+                if hypothesis ∉ chart
+                    pushfirst!(agenda, hypothesis)
+                end
+            end
+        end
+    end
+end
+
+function parse(tokens, grammar, strategy=BottomUp())
+    chart = initial_chart(tokens, grammar, strategy)
+    agenda = initial_agenda(tokens, grammar, strategy)
 
     while !isempty(agenda)
         candidate = popfirst!(agenda)
@@ -189,20 +248,8 @@ function parse(tokens, grammar)
                 pushfirst!(agenda, combined)
             end
         end
-        if !isactive(candidate)
-            for rule in grammar.productions
-                if first(rhs(rule)) == head(candidate)
-                    hypothesis = Arc(candidate.start,
-                                     candidate.start,
-                                     rule,
-                                     [])
-                    if hypothesis ∉ chart
-                        pushfirst!(agenda, hypothesis)
-                    end
-                end
-            end
-        end
-        # @show agenda
+        predict!(agenda, chart, candidate, grammar, strategy)
+        @show agenda
     end
     chart
 end
