@@ -151,6 +151,7 @@ function mates(chart::Chart, candidate::Arc)
 end
 
 function Base.push!(chart::Chart, arc::Arc)
+    @assert arc != storage(chart, arc)
     push!(storage(chart, arc), arc)
 end
 
@@ -205,28 +206,38 @@ function initial_agenda(tokens, grammar, ::TopDown)
     agenda
 end
 
-function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, ::BottomUp)
-    if !isactive(candidate)
+function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, predictions::Set{Tuple{Symbol, Int}}, ::BottomUp)
+    key = (head(candidate), candidate.start)
+    if !isactive(candidate) && key ∉ predictions
+        push!(predictions, key)
         for rule in grammar.productions
             if first(rhs(rule)) == head(candidate)
                 hypothesis = Arc(candidate.start,
                                  candidate.start,
                                  rule,
                                  [])
-                if hypothesis ∉ chart
-                    pushfirst!(agenda, hypothesis)
+                if hypothesis in agenda || hypothesis in chart
+                    @show hypothesis
+                    error("duplicate hypothesis")
                 end
+                pushfirst!(agenda, hypothesis)
             end
         end
     end
 end
 
-function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, ::TopDown)
+function predict!(agenda::Agenda, chart::Chart, candidate::Arc, grammar::Grammar, predictions::Set{Tuple{Symbol, Int}}, ::TopDown)
     if isactive(candidate)
-        for rule in grammar.productions
-            if lhs(rule) == next_needed(candidate)
-                hypothesis = Arc(candidate.stop, candidate.stop, rule, [])
-                if hypothesis ∉ chart
+        key = (next_needed(candidate), candidate.stop)
+        if key ∉ predictions
+            push!(predictions, key)
+            for rule in grammar.productions
+                if lhs(rule) == next_needed(candidate)
+                    hypothesis = Arc(candidate.stop, candidate.stop, rule, [])
+                    if hypothesis in agenda || hypothesis in chart
+                        @show hypothesis
+                        error("duplicate hypothesis")
+                    end
                     pushfirst!(agenda, hypothesis)
                 end
             end
@@ -237,18 +248,27 @@ end
 function parse(tokens, grammar, strategy=BottomUp())
     chart = initial_chart(tokens, grammar, strategy)
     agenda = initial_agenda(tokens, grammar, strategy)
+    predictions = Set{Tuple{Symbol, Int}}()
 
     while !isempty(agenda)
         candidate = popfirst!(agenda)
+        if candidate ∈ chart
+            @show candidate
+            error("duplicate candidate")
+        end
         push!(chart, candidate)
 
         for mate in mates(chart, candidate)
             combined = candidate + mate
-            if combined ∉ chart
-                pushfirst!(agenda, combined)
+            if combined in chart || combined in agenda
+                @show combined
+                error("duplicate from fundamental rule")
             end
+            # if combined ∉ chart
+                pushfirst!(agenda, combined)
+            # end
         end
-        predict!(agenda, chart, candidate, grammar, strategy)
+        predict!(agenda, chart, candidate, grammar, predictions, strategy)
         @show agenda
     end
     chart
