@@ -8,39 +8,48 @@ struct TopDown <: Strategy end
 
 # include("FixedCapacityVectors.jl")
 # using .FixedCapacityVectors
+function push(x::AbstractVector{T}, y::T)
+    result = copy(x)
+    push!(result, y)
+    result
+end
 
-const Rule = Pair{Symbol, Vector{Symbol}}
-lhs(r::Rule) = first(r)
-rhs(r::Rule) = last(r)
+head(r::Pair) = first(r)
+arguments(r::Pair) = last(r)
+
+const SymbolID = Int
+const RuleID = Pair{SymbolID, Vector{SymbolID}}
 
 struct Arc
     start::Int
     stop::Int
-    rule::Rule
-    constituents::Vector{Union{Arc, String}}
+    rule::Any
+    rule_id::RuleID
+    constituents::Vector{Arc{R}}
 end
 
 rule(arc::Arc) = arc.rule
-head(arc::Arc) = lhs(rule(arc))
+rule_id(arc::Arc) = arc.rule_id
+head(arc::Arc) = lhs(rule_id(arc))
 completions(arc::Arc) = length(arc.constituents)
 constituents(arc::Arc) = arc.constituents
-isactive(arc::Arc) = completions(arc) < length(rhs(rule(arc)))
+isactive(arc::Arc) = completions(arc) < length(rhs(rule_id(arc)))
 function next_needed(arc::Arc)
     @assert isactive(arc)
-    rhs(rule(arc))[completions(arc) + 1]
+    rhs(rule_id(arc))[completions(arc) + 1]
 end
 
 function Base.show(io::IO, arc::Arc)
     constituents = copy(rhs(rule(arc)))
     insert!(constituents, completions(arc) + 1, :.)
-    print(io, "<$(arc.start), $(arc.stop), $(head(arc)) -> $(join(constituents, ' '))>")
+    print(io, "<$(arc.start), $(arc.stop), $(lhs(rule(arc))) -> $(join(constituents, ' '))>")
 end
 
 
 function Base.hash(arc::Arc, h::UInt)
     h = hash(arc.start, h)
     h = hash(arc.stop, h)
-    h = hash(objectid(arc.rule), h)
+    h = hash(rule_id(arc), h)
     for c in arc.constituents
         h = hash(objectid(c), h)
     end
@@ -50,7 +59,7 @@ end
 function Base.:(==)(a1::Arc, a2::Arc)
     a1.start == a2.start || return false
     a1.stop == a2.stop || return false
-    a1.rule === a2.rule || return false
+    a1.rule_id === a2.rule_id || return false
     length(a1.constituents) == length(a2.constituents) || return false
     for i in eachindex(a1.constituents)
         a1.constituents[i] === a2.constituents[i] || return false
@@ -61,7 +70,7 @@ end
 function Base.:*(a1::Arc, a2::Arc)
     @assert isactive(a1) && !isactive(a2)
     @assert next_needed(a1) == head(a2)
-    Arc(a1.start, a2.stop, a1.rule, vcat(a1.constituents, a2))
+    Arc(a1.start, a2.stop, a1.rule, a1.rule_id, push(constituents(a1), a2))
 end
 
 function Base.:+(a1::Arc, a2::Arc)
@@ -70,7 +79,7 @@ function Base.:+(a1::Arc, a2::Arc)
     elseif !isactive(a1) && isactive(a2)
         a2 * a1
     else
-        throw(ArgumentError("Can only combine an active and an inactive edge"))
+        throw(ArgumentError("Can only combine an active and an inactive arc"))
     end
 end
 
@@ -100,58 +109,40 @@ function expand(io::IO, arc::Arc, indentation=0)
     print(io, ")")
 end
 
+const ChartElement = Vector{Arc}
 
 struct Chart
     num_tokens::Int
-    active::Dict{Symbol, Vector{Set{Arc}}} # organized by next needed constituent then by stop
-    inactive::Dict{Symbol, Vector{Set{Arc}}} # organized by head then by start
+    active::Matrix{ChartElement} # organized by next needed constituent then by stop
+    inactive::Matrix{ChartElement} # organized by head then by start
 end
+
+
 
 num_tokens(chart::Chart) = chart.num_tokens
 
 Chart(num_tokens) = Chart(num_tokens,
-                          Dict{Symbol, Vector{Set{Arc}}}(),
-                          Dict{Symbol, Vector{Set{Arc}}}())
-
-function storage(chart::Chart, active::Bool, symbol::Symbol, node::Integer)
-    if active
-        d = chart.active
-    else
-        d = chart.inactive
-    end
-    v = get!(d, symbol) do
-        [Set{Arc}() for _ in 0:num_tokens(chart)]
-    end
-    v[node + 1]
-end
-
+                          Matrix{ChartElement}(),
+                          Matrix{ChartElement}())
 
 function storage(chart::Chart, arc::Arc)
     if isactive(arc)
-        i = arc.stop
-        s = next_needed(arc)
-        return storage(chart, true, s, i)
+        chart.active[next_needed(arc), arc.stop + 1]
     else
-        i = arc.start
-        s = head(arc)
-        return storage(chart, false, s, i)
+        chart.inactive[head(arc), arc.start + 1]
     end
 end
 
 function mates(chart::Chart, candidate::Arc)
     if isactive(candidate)
-        i = candidate.stop
-        s = next_needed(candidate)
-        return storage(chart, false, s, i)
+        chart.inactive[next_needed(candidate), candidate.stop + 1]
     else
-        i = candidate.start
-        s = head(candidate)
-        return storage(chart, true, s, i)
+        chart.active[head(candidate), candidate.start + 1]
     end
 end
 
 function Base.push!(chart::Chart, arc::Arc)
-    @assert arc != storage(chart, arc)
+    @assert arc ∉ storage(chart, arc)
     push!(storage(chart, arc), arc)
 end
 
@@ -159,13 +150,21 @@ function Base.in(arc::Arc, chart::Chart)
     arc ∈ storage(chart, arc)
 end
 
+function inactive_arcs(symbol::SymbolID, start::Integer, stop::Integer)
+    filter(chart.inactive[symbol, start + 1]) do arc
+        arc.stop == stop
+    end
+end
+
+
+
 complete_parses(chart::Chart) = filter(storage(chart, false, :S, 0)) do arc
     arc.stop == num_tokens(chart)
 end
 
 struct Grammar
     productions::Vector{Rule}
-    words::Dict{String, Vector{Symbol}}
+    start_symbol
 end
 
 const Agenda = Vector{Arc}

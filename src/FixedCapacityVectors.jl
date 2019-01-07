@@ -1,25 +1,27 @@
 module FixedCapacityVectors
 
-export FixedCapacityVector
+export SFCVector, push
 
-struct FixedCapacityVector{N, T} <: AbstractVector{T}
-    data::NTuple{N, T}
+struct SFCVector{N, T} <: AbstractVector{T}
     length::Int
+    data::NTuple{N, T}
+
+    SFCVector{N, T}() where {N, T} = new{N, T}(0)
+    SFCVector{N, T}(length::Integer, data::NTuple{N, T}) where {N, T} = new{N, T}(length, data)
 end
 
-Base.size(f::FixedCapacityVector) = (f.length,)
-@inline function Base.getindex(f::FixedCapacityVector, i::Integer)
-    @boundscheck i >= 0 && i <= f.length || throw(BoundsError())
-    f.data[i]
+Base.size(v::SFCVector) = (v.length,)
+
+@inline function Base.getindex(v::SFCVector, i::Integer)
+    @boundscheck (i >= 1 && i <= v.length) || throw(BoundsError())
+    @inbounds v.data[i]
 end
 
-@generated function Base.convert(::Type{FixedCapacityVector{N, T}}, v::AbstractVector) where {N, T}
+@generated function push(v::SFCVector{N, T}, x::T) where {N, T}
     quote
-        firstindex(v) == 1 || throw(ArgumentError("Vector v must use 1-based inexing"))
-        length(v) <= N || throw(ArgumentError("Vector v is too long ($(length(v))) for fixed-capacity vector with capatcity $N"))
-        len = length(v)
-        data = $(Expr(:tuple, [:(convert(T, v[($i <= len ? $i : len)])) for i in 1:N]...))
-        FixedCapacityVector(data, length(v))
+        @boundscheck (v.length < N) || throw(BoundsError())
+        data = $(Expr(:tuple, [:($i <= v.length ? @inbounds(v[$i]) : x) for i in 1:N]...))
+        SFCVector{N, T}(v.length + 1, data)
     end
 end
 
