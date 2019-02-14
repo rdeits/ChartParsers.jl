@@ -217,7 +217,6 @@ end
 
 function Base.iterate(parser::ChartParser{R, T}, state=initial_state(parser)) where {R, T}
     while !isempty(state.agenda)
-        @show state.agenda
         candidate = pop!(state.agenda)
         if is_finished(candidate)
             arc = passive(candidate)
