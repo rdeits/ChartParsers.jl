@@ -1,6 +1,8 @@
 module ChartParsers
 
-export SimpleGrammar, ArcData, ChartParser, is_complete, BottomUp, TopDown
+using DataStructures: SortedSet
+
+export Arc, ChartParser, is_complete, BottomUp, TopDown, SimpleGrammar, SimpleRule, TerminalWeightedGrammar
 
 function push(x::AbstractVector{T}, y::T) where {T}
     result = copy(x)

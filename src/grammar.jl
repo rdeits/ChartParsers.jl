@@ -7,8 +7,10 @@ function productions end
 function terminal_productions end
 function start_symbol end
 
-struct SimpleGrammar <: AbstractGrammar{Pair{Symbol, Vector{Symbol}}}
-    productions::Vector{Pair{Symbol, Vector{Symbol}}}
+const SimpleRule = Pair{Symbol, Vector{Symbol}}
+
+struct SimpleGrammar <: AbstractGrammar{SimpleRule}
+    productions::Vector{SimpleRule}
     categories::Dict{String, Vector{Symbol}}
     start::Symbol
 end
@@ -17,11 +19,33 @@ productions(g::SimpleGrammar) = g.productions
 start_symbol(g::SimpleGrammar) = g.start
 
 function terminal_productions(g::SimpleGrammar, tokens::AbstractVector{<:AbstractString})
-    result = ArcData{rule_type(g)}[]
+    R = rule_type(g)
+    result = Arc{R}[]
     for (i, token) in enumerate(tokens)
         for category in get(g.categories, token, Symbol[])
-            push!(result, ArcData{rule_type(g)}(i - 1, i, category => Symbol[]))
+            push!(result, Arc{R}(i - 1, i, category => Symbol[], Arc{R}[], 1.0))
         end
     end
     result
 end
+
+struct TerminalWeightedGrammar <: AbstractGrammar{SimpleRule}
+    productions::Vector{SimpleRule}
+    categories::Dict{String, Vector{Pair{Symbol, Float64}}}
+    start::Symbol
+end
+
+productions(g::TerminalWeightedGrammar) = g.productions
+start_symbol(g::TerminalWeightedGrammar) = g.start
+
+function terminal_productions(g::TerminalWeightedGrammar, tokens::AbstractVector{<:AbstractString})
+    R = rule_type(g)
+    result = Arc{R}[]
+    for (i, token) in enumerate(tokens)
+        for (category, weight) in get(g.categories, token, Symbol[])
+            push!(result, Arc{R}(i - 1, i, category => Symbol[], Arc{R}[], weight))
+        end
+    end
+    result
+end
+

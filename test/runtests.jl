@@ -5,8 +5,8 @@ using ChartParsers: ActiveArc, PassiveArc, rule, start, stop, constituents, Char
 @testset "arc in chart detection" begin
     R = Pair{Symbol, Vector{Symbol}}
     chart = Chart{R, Symbol}(2)
-    a1 = PassiveArc(ArcData(0, 1, :NP => Symbol[]))
-    a2 = ActiveArc(ArcData(0, 0, :S => [:NP, :VP]))
+    a1 = PassiveArc(Arc(0, 1, :NP => Symbol[], [], 1))
+    a2 = ActiveArc(Arc(0, 0, :S => [:NP, :VP], [], 1))
     a3 = combine(a2, a1)
 
     @test a1 ∉ chart
@@ -118,10 +118,10 @@ ChartParsers.productions(g::TypedGrammar) = g.productions
 
 function ChartParsers.terminal_productions(g::TypedGrammar, tokens)
     R = ChartParsers.rule_type(g)
-    result = ArcData{R}[]
+    result = Arc{R}[]
     for (i, token) in enumerate(tokens)
         for label in get(g.labels, token, GrammaticalSymbol[])
-            push!(result, ArcData{R}(i - 1, i, label => ()))
+            push!(result, Arc{R}(i - 1, i, label => (), [], 1))
         end
     end
     result
@@ -140,4 +140,32 @@ ChartParsers.start_symbol(g::TypedGrammar) = S()
     complete_parses = @inferred collect(Iterators.filter(is_complete(parser), parser))
     @test length(complete_parses) == 1
     @test rule(first(complete_parses)) == (S() => (NP(), VP()))
+end
+
+@testset "Weighted terminal productions" begin
+    grammar = TerminalWeightedGrammar([
+        :A => [:B, :C],
+        :B => [:E],
+        :C => [:F],
+        :C => [:G]],
+        Dict("a" => [:D => 0.6, :E => 0.4],
+             "b" => [:F => 0.9, :G => 0.1]),
+        :A)
+    tokens = split("a b")
+    parser = ChartParser(tokens, grammar)
+    parses = collect(parser)
+    @test rule.(parses) == [
+        :F => Symbol[],
+        :C => [:F],
+        :D => Symbol[],
+        :E => Symbol[],
+        :B => [:E],
+        :A => [:B, :C],
+        :G => Symbol[],
+        :C => [:G],
+        :A => [:B, :C]
+    ]
+
+    p = first(filter(is_complete(parser), parses))
+    @test rule.(constituents(p)) == [:B => [:E], :C => [:F]]
 end

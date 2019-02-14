@@ -8,27 +8,30 @@ end
 
 function initial_chart(tokens, grammar::AbstractGrammar{R}, ::TopDown) where {R}
     chart = Chart{R, chart_key(grammar)}(length(tokens))
-    for arc_data in terminal_productions(grammar, tokens)
-        push!(chart, PassiveArc(arc_data))
+    for arc in terminal_productions(grammar, tokens)
+        push!(chart, PassiveArc(arc))
     end
     chart
 end
 
-const Agenda{R} = Vector{ActiveArc{R}}
+const Agenda{R} = SortedSet{ActiveArc{R}}
+
+empty_agenda(::Type{R}) where {R} = Agenda{R}(Base.Order.ReverseOrdering(Base.Order.By(
+    arc -> (score(arc), objectid(arc)))))
 
 function initial_agenda(tokens, grammar::AbstractGrammar{R}, ::BottomUp) where {R}
-    agenda = Agenda{R}()
-    for arc_data in terminal_productions(grammar, tokens)
-        push!(agenda, ActiveArc(arc_data))
+    agenda = empty_agenda(R)
+    for arc in terminal_productions(grammar, tokens)
+        push!(agenda, ActiveArc(arc))
     end
     agenda
 end
 
 function initial_agenda(tokens, grammar::AbstractGrammar{R}, ::TopDown) where {R}
-    agenda = Agenda{R}()
+    agenda = empty_agenda(R)
     for rule in productions(grammar)
         if lhs(rule) == start_symbol(grammar)
-            push!(agenda, ActiveArc(ArcData(0, 0, rule)))
+            push!(agenda, ActiveArc(Arc(0, 0, rule, [], 1)))
         end
     end
     agenda
@@ -112,7 +115,7 @@ function predict!(agenda::Agenda, chart::Chart, candidate::ActiveArc,
     if is_new
         for rule in productions(grammar)
             if lhs(rule) === next_needed(candidate)
-                push!(agenda, ActiveArc(ArcData(stop(candidate), stop(candidate), rule)))
+                push!(agenda, ActiveArc(Arc(stop(candidate), stop(candidate), rule, Arc{R}[], 1.0)))
             end
         end
     end
@@ -131,7 +134,7 @@ function predict!(agenda::Agenda, chart::Chart, candidate::PassiveArc,
     if is_new
         for rule in productions(grammar)
             if first(rhs(rule)) === head(candidate)
-                push!(agenda, ActiveArc(ArcData(start(candidate), start(candidate), rule)))
+                push!(agenda, ActiveArc(Arc(start(candidate), start(candidate), rule, Arc{R}[], 1.0)))
             end
         end
     end
