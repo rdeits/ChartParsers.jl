@@ -1,9 +1,7 @@
-authors = ["Robin Deits <robin.deits@gmail.com>"]
 name = "ChartParsers"
 uuid = "de988000-0167-11e9-3115-2b7bbce15f76"
+authors = ["Robin Deits <robin.deits@gmail.com>"]
 version = "0.0.1"
-
-[deps]
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
