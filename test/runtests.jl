@@ -1,12 +1,13 @@
 using Test
 using ChartParsers
-using ChartParsers: Arc, parse, head
+using ChartParsers: ActiveArc, PassiveArc, rule, start, stop, constituents, Chart, combine, head, AbstractGrammar
 
 @testset "arc in chart detection" begin
-    chart = Chart(2)
-    a1 = Arc(0, 1, :NP => [:PN], ["Mary"])
-    a2 = Arc(0, 0, :S => [:NP, :VP], [])
-    a3 = a2 * a1
+    R = Pair{Symbol, Vector{Symbol}}
+    chart = Chart{R, Symbol}(2)
+    a1 = PassiveArc(ArcData(0, 1, :NP => Symbol[]))
+    a2 = ActiveArc(ArcData(0, 0, :S => [:NP, :VP]))
+    a3 = combine(a2, a1)
 
     @test a1 ∉ chart
     @test a2 ∉ chart
@@ -28,7 +29,7 @@ end
 @testset "Example from nlp-with-prolog" begin
     # example taken from http://cs.union.edu/~striegnk/courses/nlp-with-prolog/html/node71.html#l9.sec.bottomup
 
-    grammar = Grammar([
+    grammar = SimpleGrammar([
             :S => [:NP, :VP, :PP],
             :S => [:NP, :VP],
             :NP => [:PN],
@@ -37,55 +38,106 @@ end
         ], Dict(
             "mia" => [:PN],
             "danced" => [:IV]
-        ))
+        ), :S)
 
-    chart = parse(split("mia danced"), grammar)
-    @test length(complete_parses(chart)) == 1
-    p = first(complete_parses(chart))
-    @test head(p) == :S
-    @test p.rule == (:S => [:NP, :VP])
-    @test !ChartParsers.isactive(p)
-    @test p.constituents[1].rule == (:NP => [:PN])
-    @test p.constituents[2].rule == (:VP => [:IV])
+    tokens = split("mia danced")
+
+    @testset "BottomUp" begin
+        parser = ChartParser(tokens, grammar, BottomUp())
+        parses = collect(parser)
+        @test length(parses) == 5
+
+        complete_parses = collect(Iterators.filter(is_complete(parser), parser))
+        @test length(complete_parses) == 1
+        p = first(complete_parses)
+        @test head(p) == :S
+        @test rule(p) == (:S => [:NP, :VP])
+        @test rule(constituents(p)[1]) == (:NP => [:PN])
+        @test rule(constituents(p)[2]) == (:VP => [:IV])
+    end
+
+    @testset "TopDown" begin
+        parser = ChartParser(tokens, grammar, TopDown())
+        parses = collect(parser)
+
+        # The top down parser currently doesn't yield the terminal productions,
+        # but the bottom up parser does. Should we change that?
+        @test length(parses) == 3
+
+        complete_parses = collect(Iterators.filter(is_complete(parser), parser))
+        @test length(complete_parses) == 1
+        p = first(complete_parses)
+        @test head(p) == :S
+        @test rule(p) == (:S => [:NP, :VP])
+        @test rule(constituents(p)[1]) == (:NP => [:PN])
+        @test rule(constituents(p)[2]) == (:VP => [:IV])
+    end
 end
 
 @testset "longer example" begin
     tokens = split("mary sat on the table yesterday")
-    grammar = [
-        :S => [:NP, :VP],
-        :NP => [:PN],
-        :VP => [:V, :NP],
-        :VP => [:V, :PP],
-        :VP => [:VP, :AV],
-        :PP => [:P, :NP],
-        :NP => [:D, :N]
-    ]
-    labels = Dict(
+    grammar = SimpleGrammar([
+            :S => [:NP, :VP],
+            :NP => [:PN],
+            :VP => [:V, :NP],
+            :VP => [:V, :PP],
+            :VP => [:VP, :AV],
+            :PP => [:P, :NP],
+            :NP => [:D, :N]
+        ], Dict(
         "mary" => [:PN],
         "sat" => [:V],
         "on" => [:P],
         "the" => [:D],
         "table" => [:N],
         "yesterday" => [:AV]
-    )
-    chart = parse(tokens, Grammar(grammar, labels))
-    parses = complete_parses(chart)
+        ), :S)
+    parser = ChartParser(tokens, grammar)
+    complete_parses = @inferred collect(Iterators.filter(is_complete(parser), parser))
+    @test length(complete_parses) == 1
 
-    @test length(parses) == 1
-    io = IOBuffer()
-    expand(io, first(parses))
-    @test String(take!(io)) == """
-(S
-  (NP (PN "mary"))
-  (VP
-    (VP
-      (V "sat")
-      (PP
-        (P "on")
-        (NP
-          (D "the")
-          (N "table"))))
-    (AV "yesterday")))"""
+    p = first(complete_parses)
+    @test head(p) == :S
+    @test rule(p) == (:S => [:NP, :VP])
+    @test rule(constituents(p)[1]) == (:NP => [:PN])
+    @test rule(constituents(p)[2]) == (:VP => [:VP, :AV])
+    @test rule(constituents(constituents(p)[2])[1]) == (:VP => [:V, :PP])
 end
 
+abstract type GrammaticalSymbol end
+struct S <: GrammaticalSymbol end
+struct VP <: GrammaticalSymbol end
+struct NP <: GrammaticalSymbol end
 
+struct TypedGrammar <: AbstractGrammar{Pair{GrammaticalSymbol, NTuple{N, GrammaticalSymbol} where N}}
+    productions::Vector{Pair{GrammaticalSymbol, NTuple{N, GrammaticalSymbol} where N}}
+    labels::Dict{String, Vector{GrammaticalSymbol}}
+end
+
+ChartParsers.productions(g::TypedGrammar) = g.productions
+
+function ChartParsers.terminal_productions(g::TypedGrammar, tokens)
+    R = ChartParsers.rule_type(g)
+    result = ArcData{R}[]
+    for (i, token) in enumerate(tokens)
+        for label in get(g.labels, token, GrammaticalSymbol[])
+            push!(result, ArcData{R}(i - 1, i, label => ()))
+        end
+    end
+    result
+end
+
+ChartParsers.start_symbol(g::TypedGrammar) = S()
+
+@testset "typed rules" begin
+    tokens = split("mia danced")
+    grammar = TypedGrammar([
+            S() => (VP(), NP()),
+            S() => (NP(), VP())
+        ],
+        Dict("mia" => [NP()], "danced" => [VP()]))
+    parser = ChartParser(tokens, grammar)
+    complete_parses = @inferred collect(Iterators.filter(is_complete(parser), parser))
+    @test length(complete_parses) == 1
+    @test rule(first(complete_parses)) == (S() => (NP(), VP()))
+end
