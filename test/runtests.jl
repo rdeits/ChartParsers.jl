@@ -105,6 +105,7 @@ end
 end
 
 abstract type GrammaticalSymbol end
+struct Token <: GrammaticalSymbol end
 struct S <: GrammaticalSymbol end
 struct VP <: GrammaticalSymbol end
 struct NP <: GrammaticalSymbol end
@@ -121,7 +122,7 @@ function ChartParsers.terminal_productions(g::TypedGrammar, tokens)
     result = Arc{R}[]
     for (i, token) in enumerate(tokens)
         for label in get(g.labels, token, GrammaticalSymbol[])
-            push!(result, Arc{R}(i - 1, i, label => (), [], 1))
+            push!(result, Arc{R}(i - 1, i, label => (Token(),), [token], 1))
         end
     end
     result

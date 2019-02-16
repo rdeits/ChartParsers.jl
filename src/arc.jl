@@ -4,7 +4,7 @@ struct Arc{Rule} <: AbstractArc{Rule}
     start::Int
     stop::Int
     rule::Rule
-    constituents::Vector{Arc{Rule}}
+    constituents::Vector{Union{Arc{Rule}, String}}
     score::Float64
 end
 
@@ -41,10 +41,22 @@ is_finished(arc::ActiveArc) = num_constituents(arc) == length(rhs(rule(arc)))
 next_needed(arc::ActiveArc) = rhs(rule(arc))[num_constituents(arc) + 1]
 passive(arc::ActiveArc) = PassiveArc(inner(arc))
 
+_show(io::IO, arc::AbstractArc) = print(io, arc)
+_show(io::IO, s::AbstractString) = print(io, '"', s, '"')
+
 function Base.show(io::IO, arc::AbstractArc)
-    constituents = Vector{Any}(collect(rhs(rule(arc))))
-    insert!(constituents, num_constituents(arc) + 1, :.)
-    print(io, "<$(start(arc)), $(stop(arc)), $(lhs(rule(arc))) -> $(join(constituents, ' '))>")
+    print(io, "($(start(arc)), $(stop(arc)), $(lhs(rule(arc))) -> ")
+    for i in 1:length(rhs(rule(arc)))
+        if i <= length(constituents(arc))
+            _show(io, constituents(arc)[i])
+        elseif i == length(constituents(arc)) + 1
+            print(io, " . ")
+        end
+        if i > length(constituents(arc))
+            print(io, rhs(rule(arc))[i])
+        end
+    end
+    print(io, " ($(round(score(arc), digits=6))))")
 end
 
 """
@@ -55,7 +67,7 @@ Combine two arcs according to the Fundamental Rule.
 function combine(a1::ActiveArc, a2::PassiveArc)
     new_constituents = push(constituents(a1), inner(a2))
     # Geometric mean
-    new_score = reduce((s, arc) -> s * score(arc), new_constituents, init=1.0) / length(new_constituents)
+    new_score = reduce((s, arc) -> s * score(arc), new_constituents, init=1.0) ^ (1 / length(new_constituents))
     ActiveArc(Arc(start(a1), stop(a2), rule(a1), new_constituents, new_score))
 end
 

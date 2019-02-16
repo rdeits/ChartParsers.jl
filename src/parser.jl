@@ -83,7 +83,7 @@ function Base.iterate(parser::ChartParser{R, T}, state=initial_state(parser)) wh
         if is_finished(candidate)
             arc = passive(candidate)
             update!(state, parser, arc)
-            return (arc, state)
+            return (inner(arc), state)
         else
             update!(state, parser, candidate)
         end
@@ -92,9 +92,9 @@ function Base.iterate(parser::ChartParser{R, T}, state=initial_state(parser)) wh
 end
 
 Base.IteratorSize(::Type{<:ChartParser}) = Base.SizeUnknown()
-Base.eltype(::Type{<:ChartParser{R}}) where {R} = PassiveArc{R}
+Base.eltype(::Type{<:ChartParser{R}}) where {R} = Arc{R}
 
-function is_complete(arc::PassiveArc, parser::ChartParser)
+function is_complete(arc::Arc, parser::ChartParser)
     start(arc) == 0 && stop(arc) == length(parser.tokens) && head(arc) == start_symbol(parser.grammar)
 end
 
