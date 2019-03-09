@@ -14,10 +14,13 @@ function initial_chart(tokens, grammar::AbstractGrammar{R}, ::TopDown) where {R}
     chart
 end
 
-const Agenda{R} = SortedSet{ActiveArc{R}}
+# const Agenda{R} = SortedSet{ActiveArc{R}}
 
-empty_agenda(::Type{R}) where {R} = Agenda{R}(Base.Order.ReverseOrdering(Base.Order.By(
-    arc -> (score(arc), objectid(arc)))))
+# empty_agenda(::Type{R}) where {R} = Agenda{R}(Base.Order.ReverseOrdering(Base.Order.By(
+#     arc -> (score(arc), objectid(arc)))))
+
+const Agenda{R} = Vector{ActiveArc{R}}
+empty_agenda(::Type{R}) where {R} = Vector{ActiveArc{R}}()
 
 function initial_agenda(tokens, grammar::AbstractGrammar{R}, ::BottomUp) where {R}
     agenda = empty_agenda(R)
@@ -31,7 +34,7 @@ function initial_agenda(tokens, grammar::AbstractGrammar{R}, ::TopDown) where {R
     agenda = empty_agenda(R)
     for rule in productions(grammar)
         if lhs(rule) == start_symbol(grammar)
-            push!(agenda, ActiveArc(Arc(0, 0, rule, [], 1)))
+            push!(agenda, ActiveArc(Arc(0, 0, rule, [], score(rule))))
         end
     end
     agenda
@@ -56,13 +59,19 @@ function maybe_push!(p::PredictionCache{T}, key::Tuple{T, Int}) where {T}
     end
 end
 
-struct ChartParser{R, G <: AbstractGrammar{R}, S <: AbstractStrategy}
+struct ChartParser{R, G <: AbstractGrammar{R}, S <: AbstractStrategy, F}
     tokens::Vector{String}
     grammar::G
     strategy::S
+    scoring_function::F
 end
 
-ChartParser(tokens::AbstractVector{<:AbstractString}, grammar::G, strategy::S=BottomUp()) where {R, G <: AbstractGrammar{R}, S <: AbstractStrategy} = ChartParser{R, G, S}(tokens, grammar, strategy)
+function ChartParser(tokens::AbstractVector{<:AbstractString},
+            grammar::G,
+            strategy::S=BottomUp(),
+            scoring_function::F = arc -> 1.0) where {R, G <: AbstractGrammar{R}, S <: AbstractStrategy, F}
+    ChartParser{R, G, S, F}(tokens, grammar, strategy, scoring_function)
+end
 
 struct ChartParserState{R, T}
     chart::Chart{R, T}
@@ -81,9 +90,11 @@ function Base.iterate(parser::ChartParser{R, T}, state=initial_state(parser)) wh
     while !isempty(state.agenda)
         candidate = pop!(state.agenda)
         if is_finished(candidate)
-            arc = passive(candidate)
-            update!(state, parser, arc)
-            return (inner(arc), state)
+            arc = passive(candidate, parser.scoring_function)
+            if score(arc) > 0
+                update!(state, parser, arc)
+                return (inner(arc), state)
+            end
         else
             update!(state, parser, candidate)
         end
@@ -115,7 +126,7 @@ function predict!(agenda::Agenda, chart::Chart, candidate::ActiveArc,
     if is_new
         for rule in productions(grammar)
             if lhs(rule) === next_needed(candidate)
-                push!(agenda, ActiveArc(Arc(stop(candidate), stop(candidate), rule, Arc{R}[], 1.0)))
+                push!(agenda, ActiveArc(Arc(stop(candidate), stop(candidate), rule, Arc{R}[], score(rule))))
             end
         end
     end
@@ -134,7 +145,7 @@ function predict!(agenda::Agenda, chart::Chart, candidate::PassiveArc,
     if is_new
         for rule in productions(grammar)
             if first(rhs(rule)) === head(candidate)
-                push!(agenda, ActiveArc(Arc(start(candidate), start(candidate), rule, Arc{R}[], 1.0)))
+                push!(agenda, ActiveArc(Arc(start(candidate), start(candidate), rule, Arc{R}[], score(rule))))
             end
         end
     end

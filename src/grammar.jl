@@ -7,7 +7,21 @@ function productions end
 function terminal_productions end
 function start_symbol end
 
-const SimpleRule = Pair{Symbol, Vector{Symbol}}
+abstract type AbstractRule{R} end
+chart_key(::Type{<:AbstractRule{R}}) where {R} = R
+
+lhs(p::Pair) = first(p)
+rhs(p::Pair) = last(p)
+
+struct SimpleRule <: AbstractRule{Symbol}
+    rule::Pair{Symbol, Vector{Symbol}}
+end
+
+rhs(r::SimpleRule) = rhs(r.rule)
+lhs(r::SimpleRule) = lhs(r.rule)
+score(r::SimpleRule) = 1.0
+
+Base.convert(::Type{SimpleRule}, p::Pair{Symbol, Vector{Symbol}}) = SimpleRule(p)
 
 struct SimpleGrammar <: AbstractGrammar{SimpleRule}
     productions::Vector{SimpleRule}
@@ -29,21 +43,32 @@ function terminal_productions(g::SimpleGrammar, tokens::AbstractVector{<:Abstrac
     result
 end
 
-struct TerminalWeightedGrammar <: AbstractGrammar{SimpleRule}
-    productions::Vector{SimpleRule}
+struct SimpleWeightedRule <: AbstractRule{Symbol}
+    rule::Pair{Symbol, Vector{Symbol}}
+    score::Float64
+end
+
+rhs(r::SimpleWeightedRule) = rhs(r.rule)
+lhs(r::SimpleWeightedRule) = lhs(r.rule)
+score(r::SimpleWeightedRule) = r.score
+
+Base.convert(::Type{SimpleWeightedRule}, t::Tuple{Pair{Symbol, Vector{Symbol}}, Real}) = SimpleWeightedRule(t...)
+
+struct SimpleWeightedGrammar <: AbstractGrammar{SimpleWeightedRule}
+    productions::Vector{SimpleWeightedRule}
     categories::Dict{String, Vector{Pair{Symbol, Float64}}}
     start::Symbol
 end
 
-productions(g::TerminalWeightedGrammar) = g.productions
-start_symbol(g::TerminalWeightedGrammar) = g.start
+productions(g::SimpleWeightedGrammar) = g.productions
+start_symbol(g::SimpleWeightedGrammar) = g.start
 
-function terminal_productions(g::TerminalWeightedGrammar, tokens::AbstractVector{<:AbstractString})
+function terminal_productions(g::SimpleWeightedGrammar, tokens::AbstractVector{<:AbstractString})
     R = rule_type(g)
     result = Arc{R}[]
     for (i, token) in enumerate(tokens)
         for (category, weight) in get(g.categories, token, Symbol[])
-            push!(result, Arc{R}(i - 1, i, category => Symbol[], Arc{R}[], weight))
+            push!(result, Arc{R}(i - 1, i, SimpleWeightedRule(category => Symbol[], weight), Arc{R}[], weight))
         end
     end
     result
