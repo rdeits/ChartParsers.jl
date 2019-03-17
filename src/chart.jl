@@ -1,6 +1,3 @@
-chart_key(::Type{<:Pair{T}}) where {T} = T
-rhs(p::Pair) = last(p)
-lhs(p::Pair) = first(p)
 
 struct Chart{R, T}
     num_tokens::Int

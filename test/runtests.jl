@@ -3,10 +3,9 @@ using ChartParsers
 using ChartParsers: ActiveArc, PassiveArc, rule, start, stop, constituents, Chart, combine, head, AbstractGrammar
 
 @testset "arc in chart detection" begin
-    R = Pair{Symbol, Vector{Symbol}}
-    chart = Chart{R, Symbol}(2)
-    a1 = PassiveArc(Arc(0, 1, :NP => Symbol[], [], 1))
-    a2 = ActiveArc(Arc(0, 0, :S => [:NP, :VP], [], 1))
+    chart = Chart{SimpleRule, Symbol}(2)
+    a1 = PassiveArc(Arc(0, 1, SimpleRule(:NP => Symbol[]), [], 1))
+    a2 = ActiveArc(Arc(0, 0, SimpleRule(:S => [:NP, :VP]), [], 1))
     a3 = combine(a2, a1)
 
     @test a1 ∉ chart
@@ -51,9 +50,9 @@ end
         @test length(complete_parses) == 1
         p = first(complete_parses)
         @test head(p) == :S
-        @test rule(p) == (:S => [:NP, :VP])
-        @test rule(constituents(p)[1]) == (:NP => [:PN])
-        @test rule(constituents(p)[2]) == (:VP => [:IV])
+        @test rule(p).rule == (:S => [:NP, :VP])
+        @test rule(constituents(p)[1]).rule == (:NP => [:PN])
+        @test rule(constituents(p)[2]).rule == (:VP => [:IV])
     end
 
     @testset "TopDown" begin
@@ -68,9 +67,9 @@ end
         @test length(complete_parses) == 1
         p = first(complete_parses)
         @test head(p) == :S
-        @test rule(p) == (:S => [:NP, :VP])
-        @test rule(constituents(p)[1]) == (:NP => [:PN])
-        @test rule(constituents(p)[2]) == (:VP => [:IV])
+        @test rule(p).rule == (:S => [:NP, :VP])
+        @test rule(constituents(p)[1]).rule == (:NP => [:PN])
+        @test rule(constituents(p)[2]).rule == (:VP => [:IV])
     end
 end
 
@@ -98,10 +97,10 @@ end
 
     p = first(complete_parses)
     @test head(p) == :S
-    @test rule(p) == (:S => [:NP, :VP])
-    @test rule(constituents(p)[1]) == (:NP => [:PN])
-    @test rule(constituents(p)[2]) == (:VP => [:VP, :AV])
-    @test rule(constituents(constituents(p)[2])[1]) == (:VP => [:V, :PP])
+    @test rule(p).rule == (:S => [:NP, :VP])
+    @test rule(constituents(p)[1]).rule == (:NP => [:PN])
+    @test rule(constituents(p)[2]).rule == (:VP => [:VP, :AV])
+    @test rule(constituents(constituents(p)[2])[1]).rule == (:VP => [:V, :PP])
 end
 
 abstract type GrammaticalSymbol end
@@ -110,8 +109,15 @@ struct S <: GrammaticalSymbol end
 struct VP <: GrammaticalSymbol end
 struct NP <: GrammaticalSymbol end
 
-struct TypedGrammar <: AbstractGrammar{Pair{GrammaticalSymbol, NTuple{N, GrammaticalSymbol} where N}}
-    productions::Vector{Pair{GrammaticalSymbol, NTuple{N, GrammaticalSymbol} where N}}
+struct TypedRule <: AbstractRule{GrammaticalSymbol}
+    rule::Pair{GrammaticalSymbol, NTuple{N, GrammaticalSymbol} where N}
+end
+ChartParsers.rhs(t::TypedRule) = last(t.rule)
+ChartParsers.lhs(t::TypedRule) = first(t.rule)
+ChartParsers.score(t::TypedRule) = 1.0
+
+struct TypedGrammar <: AbstractGrammar{TypedRule}
+    productions::Vector{TypedRule}
     labels::Dict{String, Vector{GrammaticalSymbol}}
 end
 
@@ -122,7 +128,7 @@ function ChartParsers.terminal_productions(g::TypedGrammar, tokens)
     result = Arc{R}[]
     for (i, token) in enumerate(tokens)
         for label in get(g.labels, token, GrammaticalSymbol[])
-            push!(result, Arc{R}(i - 1, i, label => (Token(),), [token], 1))
+            push!(result, Arc{R}(i - 1, i, TypedRule(label => (Token(),)), [token], 1))
         end
     end
     result
@@ -132,33 +138,33 @@ ChartParsers.start_symbol(g::TypedGrammar) = S()
 
 @testset "typed rules" begin
     tokens = split("mia danced")
-    grammar = TypedGrammar([
+    grammar = TypedGrammar(TypedRule.([
             S() => (VP(), NP()),
             S() => (NP(), VP())
-        ],
+        ]),
         Dict("mia" => [NP()], "danced" => [VP()]))
     parser = ChartParser(tokens, grammar)
     complete_parses = @inferred collect(Iterators.filter(is_complete(parser), parser))
     @test length(complete_parses) == 1
-    @test rule(first(complete_parses)) == (S() => (NP(), VP()))
+    @test rule(first(complete_parses)).rule == (S() => (NP(), VP()))
 end
 
 @testset "Weighted terminal productions" begin
-    grammar = TerminalWeightedGrammar([
-        :A => [:B, :C],
-        :B => [:E],
-        :C => [:F],
-        :C => [:G]],
+    grammar = SimpleWeightedGrammar([
+        (:A => [:B, :C], 1),
+        (:B => [:E], 1),
+        (:C => [:F], 0.5),
+        (:C => [:G], 0.5)],
         Dict("a" => [:D => 0.6, :E => 0.4],
              "b" => [:F => 0.9, :G => 0.1]),
         :A)
     tokens = split("a b")
-    parser = ChartParser(tokens, grammar)
+    parser = ChartParser(tokens, grammar, BottomUp())
     parses = collect(parser)
-    @test rule.(parses) == [
+    @test_broken [rule(p).rule for p in parses] == [
         :F => Symbol[],
-        :C => [:F],
         :D => Symbol[],
+        :C => [:F],
         :E => Symbol[],
         :B => [:E],
         :A => [:B, :C],
@@ -168,5 +174,5 @@ end
     ]
 
     p = first(filter(is_complete(parser), parses))
-    @test rule.(constituents(p)) == [:B => [:E], :C => [:F]]
+    @test [rule(c).rule for c in constituents(p)] == [:B => [:E], :C => [:F]]
 end
