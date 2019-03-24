@@ -14,16 +14,20 @@ function initial_chart(tokens, grammar::AbstractGrammar{R}, ::TopDown) where {R}
     chart
 end
 
-# const Agenda{R} = SortedSet{ActiveArc{R}}
+struct Agenda{R, S <: SortedSet{ActiveArc{R}}}
+    data::S
+end
 
-# empty_agenda(::Type{R}) where {R} = Agenda{R}(Base.Order.ReverseOrdering(Base.Order.By(
-#     arc -> (score(arc), objectid(arc)))))
-
-const Agenda{R} = Vector{ActiveArc{R}}
-empty_agenda(::Type{R}) where {R} = Vector{ActiveArc{R}}()
+function Agenda{R}() where {R}
+    s = SortedSet{ActiveArc{R}}(Base.Order.ReverseOrdering(Base.Order.By(arc -> (score(arc), objectid(arc)))))
+    Agenda{R, typeof(s)}(s)
+end
+Base.push!(agenda::Agenda, arc::ActiveArc) = push!(agenda.data, arc)
+Base.pop!(agenda::Agenda) = pop!(agenda.data)
+Base.isempty(agenda::Agenda) = isempty(agenda.data)
 
 function initial_agenda(tokens, grammar::AbstractGrammar{R}, ::BottomUp) where {R}
-    agenda = empty_agenda(R)
+    agenda = Agenda{R}()
     for arc in terminal_productions(grammar, tokens)
         push!(agenda, ActiveArc(arc))
     end
@@ -31,7 +35,7 @@ function initial_agenda(tokens, grammar::AbstractGrammar{R}, ::BottomUp) where {
 end
 
 function initial_agenda(tokens, grammar::AbstractGrammar{R}, ::TopDown) where {R}
-    agenda = empty_agenda(R)
+    agenda = Agenda{R}()
     for rule in productions(grammar)
         if lhs(rule) == start_symbol(grammar)
             push!(agenda, ActiveArc(Arc(0, 0, rule, [], score(rule))))
