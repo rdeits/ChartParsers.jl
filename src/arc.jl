@@ -89,8 +89,10 @@ function combine(a1::ActiveArc, a2::PassiveArc)
     # new_score = score(rule(a1)) * geometric_mean(score.(new_constituents))
 
     # Geometric mean
-    constituent_score = reduce((s, arc) -> s * score(arc), new_constituents, init=1.0) ^ (1 / length(new_constituents))
-    new_score = score(rule(a1)) * constituent_score
+    # constituent_score = reduce((s, arc) -> s * score(arc), new_constituents, init=1.0) ^ (1 / length(new_constituents))
+    # new_score = score(rule(a1)) * constituent_score
+
+    new_score = score(rule(a1)) * minimum(score, new_constituents)
 
     ActiveArc(Arc(start(a1), stop(a2), rule(a1), new_constituents, new_score))
 end
